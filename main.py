@@ -2,6 +2,33 @@ import sqlite3
 from datetime import datetime, date, timedelta
 
 
+#helper fucntions
+def _init_table():
+    con = sqlite3.connect('habits.db')
+    cur = con.cursor()
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS habits (
+        id INTEGER PRIMARY KEY,
+        name TEXT UNIQUE NOT NULL,
+        frequency INTEGER NOT NULL,
+        goal_per_frequency INTEGER NOT NULL,
+        streak INTEGER NOT NULL DEFAULT 0,
+        progress INTEGER NOT NULL DEFAULT 0,
+        last_done TEXT
+    )
+    """)
+    con.commit()
+    con.close()
+
+_init_table()  # ensure table exists
+
+def read_int(prompt):
+    while True:
+        s = input(prompt).strip()
+        if s.isdigit():
+            return int(s)
+        print("Please enter a positive number.")
+
 def markdone():
     name = input('Enter habit name: ').strip()
 
@@ -28,36 +55,43 @@ def markdone():
     if progress is not None:
         progress = int(progress)
     if streak is None:
-        streak = 0
-
-    # convert stored date text to date object
+        streak = 0  
+    
     if last_done:
-        last_done_date = datetime.strptime(last_done, "%Y-%m-%d").date()
-    else:
-        last_done_date = None
-
-    # within the same cycle window
-    if last_done_date and (today - last_done_date).days < frequency:
-        progress += 1
-        if progress == goal:
-            streak += 1
-            last_done_date = today
-            print(f"Habit '{name}' goal reached! Streak now {streak}.")
-        elif progress > goal:
-            progress = goal  # cap progress
-            print(f"Habit '{name}' already completed for this cycle.")
+        try:
+            last_done_date = datetime.strptime(last_done, "%Y-%m-%d").date()
+        except ValueError:
+            # malformed stored value; treat as never done
+            last_done_date = None
         else:
-            print(f"Progress updated: {progress}/{goal}")
+            last_done_date = None
+
+
+    days_since = (today - last_done_date).days if last_done_date else None
+    same_cycle = (last_done_date is not None) and (days_since < frequency)
+
+    if same_cycle:
+        #stay in same cycle
+        if progress < goal:
+            progress += 1
+            if progress == goal:
+                streak += 1
+            else:
+                print(f"Progress updated: {progress}/{goal}")
+
     else:
-        # new cycle or first entry
-        streak = 1 if not last_done_date or (today - last_done_date).days > frequency else streak + 1
-        last_done_date = today
+        #start a new cycle
+        if last_done_date is not None and progress >= goal:
+            streak += 1
+        else:
+            streak = 0
+
         progress = 1
-        print(f"Habit '{name}' restarted. Current progress: {progress}/{goal}")
+        last_done_date = today
 
     cur.execute(
         "UPDATE habits SET streak = ?, last_done = ?, progress = ? WHERE name = ?",
-        (streak, last_done_date.isoformat(), progress, name)
+        (streak, last_done_date.isoformat(), progress, name),
     )
 
     con.commit()
@@ -67,8 +101,9 @@ def markdone():
 
 def add_habit():
     name = input('Enter habit name: ').strip()
-    frequency = int(input('Enter frequency in days: '))
-    goal = int(input('Enter your goal (times per cycle): '))
+    frequency = read_int('Enter frequency in days: ')
+    goal = read_int('Enter your goal (times per cycle): ')
+
 
     con = sqlite3.connect('habits.db')
     cur = con.cursor()
@@ -104,6 +139,11 @@ def view_habits():
         print(f"   Progress: {progress}/{goal}")
         print(f"   Streak: {streak}")
         print(f"   Last done: {last_done_display}\n")
+
+        remaining = max(0, int(goal) - int(progress))
+        print(f"   Progress: {progress}/{goal}. Remaining: {remaining}")
+
+
 
 
 def remove_habit():
